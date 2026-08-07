@@ -254,6 +254,21 @@ the `Project-Access-Token` header) or an account/workspace token (sent as
 `python scripts/hourly_digest.py --dry-run` (needs `RAILWAY_API_TOKEN`,
 `RAILWAY_SERVICE_ID`, `RAILWAY_ENVIRONMENT_ID` in the environment).
 
+**Daily security digest (email)** — a GitHub Actions workflow
+(`.github/workflows/daily-security-digest.yml`) runs `scripts/daily_security_digest.py`
+once a day: it reads the last 24h of the gateway's Railway logs and emails a summary
+**only when something changed** — an account/token/OAuth-client count changed (the
+gateway only logs `stats` when one of those counts actually moves, so its mere
+presence in the window already means "something changed"), a login completed
+(`token-issued`), an anomaly occurred (same 5xx/error/critical counting as the hourly
+digest), or the liveness probe failed. Silent otherwise — no daily "all clear" email.
+Sends via SMTP (`smtplib`, e.g. a Gmail App Password — not the account password).
+Requires repo secrets `RAILWAY_API_TOKEN` (shared with the hourly digest),
+`SMTP_USER`, `SMTP_APP_PASSWORD`, `DIGEST_EMAIL_TO` (service/environment ids and
+`GATEWAY_URL` are set as workflow env). Run it by hand with
+`python scripts/daily_security_digest.py --dry-run` (needs `RAILWAY_API_TOKEN`,
+`RAILWAY_SERVICE_ID`, `RAILWAY_ENVIRONMENT_ID`, `GATEWAY_URL` in the environment).
+
 **PostHog telemetry** — with `POSTHOG_API_KEY` set (see the env table), the
 gateway also ships analytics to PostHog (EU cloud; design:
 `docs/superpowers/specs/2026-07-20-posthog-telemetry-design.md`):
