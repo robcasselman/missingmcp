@@ -12,6 +12,10 @@ on:
         description: "Print the digest but do not send email"
         type: boolean
         default: false
+      test_email:
+        description: "Send one canned test email via Resend and exit (skips Railway/change-detection)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -41,3 +45,4 @@ jobs:
         run: >
           python scripts/daily_security_digest.py
           ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && '--dry-run' || '' }}
+          ${{ (github.event_name == 'workflow_dispatch' && inputs.test_email) && '--test-email' || '' }}

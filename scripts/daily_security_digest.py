@@ -183,7 +183,24 @@ def main():
     p = argparse.ArgumentParser(description="Daily gateway security digest -> email.")
     p.add_argument("--dry-run", action="store_true", help="print, don't send")
     p.add_argument("--window-hours", type=int, default=24, help="log window in hours")
+    p.add_argument("--test-email", action="store_true",
+                   help="send one canned test message via Resend and exit, skipping "
+                        "Railway/change-detection entirely -- verifies RESEND_API_KEY "
+                        "and DIGEST_EMAIL_TO are wired correctly on their own")
     args = p.parse_args()
+
+    if args.test_email:
+        send_email(
+            _need("RESEND_API_KEY"),
+            _need("DIGEST_EMAIL_TO"),
+            os.environ.get("DIGEST_EMAIL_FROM", "onboarding@resend.dev"),
+            "[MissingMCP] test email -- daily security digest",
+            "This is a one-off test message from scripts/daily_security_digest.py "
+            "--test-email. If you got this, RESEND_API_KEY and DIGEST_EMAIL_TO are "
+            "wired correctly; the real digest only sends when something changed.",
+        )
+        print("[sent] test email")
+        return
 
     token = _need("RAILWAY_API_TOKEN")
     service_id = _need("RAILWAY_SERVICE_ID")
