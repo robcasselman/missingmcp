@@ -26,8 +26,7 @@ jobs:
     timeout-minutes: 5
     env:
       RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
-      SMTP_USER: ${{ secrets.SMTP_USER }}
-      SMTP_APP_PASSWORD: ${{ secrets.SMTP_APP_PASSWORD }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
       DIGEST_EMAIL_TO: ${{ secrets.DIGEST_EMAIL_TO }}
       RAILWAY_SERVICE_ID: d39f0a0b-a7e1-4295-a9a1-76347dedc68d
       RAILWAY_ENVIRONMENT_ID: 1ec0b318-e237-44d2-8919-7e6807de0b8b

@@ -29,9 +29,9 @@ jobs:
       RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
       GITHUB_TOKEN: ${{ github.token }}   # heartbeat catch-up (list prior runs)
-      RAILWAY_SERVICE_ID: 46a897db-2758-4cc0-855b-194a3a9a4164
-      RAILWAY_ENVIRONMENT_ID: 622730fa-6d86-40d3-b0bd-6de19bd42728
-      GATEWAY_URL: https://missingmcp.com
+      RAILWAY_SERVICE_ID: d39f0a0b-a7e1-4295-a9a1-76347dedc68d
+      RAILWAY_ENVIRONMENT_ID: 1ec0b318-e237-44d2-8919-7e6807de0b8b
+      GATEWAY_URL: https://garmin.metalevels.net
       # HEARTBEAT_HOUR / REPORT_TZ / ANOMALY_MIN use the script defaults
       # (08:00 Europe/Prague, >=3). Override here if needed.
     steps:

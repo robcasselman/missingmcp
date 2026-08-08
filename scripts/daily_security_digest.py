@@ -15,18 +15,21 @@ without sending anything -- no daily "all clear" noise.
 Standalone (httpx + stdlib only, does not import the missingmcp package), so it
 runs in GitHub Actions without installing the gateway's dependencies.
 
+Email delivery is via the Resend HTTP API (https://resend.com) rather than SMTP —
+one POST, mirrors report.py's post_slack() shape, no mail-account credential
+needed. RESEND_API_KEY is a Resend account, not a mail account, so it can't be
+used to send-as you anywhere else. DIGEST_EMAIL_FROM can stay the shared
+onboarding@resend.dev sender (works out of the box, no setup) or point at a
+domain you've verified with Resend for a branded From: address.
+
 Env:
   RAILWAY_API_TOKEN       account/workspace or project token (Bearer)  [required]
   RAILWAY_SERVICE_ID      gateway service uuid                         [required]
   RAILWAY_ENVIRONMENT_ID  environment uuid                             [required]
   GATEWAY_URL             liveness-probe target (default https://missingmcp.com)
   DIGEST_EMAIL_TO         recipient address                [required unless --dry-run]
-  DIGEST_EMAIL_FROM       From: address (default: SMTP_USER)
-  SMTP_USER               SMTP auth username / sending address [required unless --dry-run]
-  SMTP_APP_PASSWORD       SMTP auth password (a Gmail App Password, not the
-                          account password) [required unless --dry-run]
-  SMTP_HOST               default smtp.gmail.com
-  SMTP_PORT               default 465 (implicit TLS / SMTPS)
+  DIGEST_EMAIL_FROM       From: address (default: onboarding@resend.dev)
+  RESEND_API_KEY          Resend API key                   [required unless --dry-run]
   ANOMALY_MIN             min problem rows before the subject line reads
                           "anomaly" instead of "activity" (default 3)
 
@@ -38,14 +41,15 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import smtplib
-import ssl
 import sys
 from datetime import datetime, timedelta, timezone
-from email.message import EmailMessage
+
+import httpx
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hourly_digest as hd  # noqa: E402 - reuse Railway log fetch/parse, not duplicate it
+
+RESEND_API = "https://api.resend.com/emails"
 
 
 def _decode(v):
@@ -155,17 +159,17 @@ def render_email(summary: dict, stats: list[dict], logins: list[dict],
 
 # --- I/O ---------------------------------------------------------------------
 
-def send_email(smtp_host: str, smtp_port: int, user: str, password: str,
-               to_addr: str, from_addr: str, subject: str, body: str) -> None:
-    msg = EmailMessage()
-    msg["Subject"] = subject
-    msg["From"] = from_addr
-    msg["To"] = to_addr
-    msg.set_content(body)
-    context = ssl.create_default_context()
-    with smtplib.SMTP_SSL(smtp_host, smtp_port, context=context, timeout=30) as s:
-        s.login(user, password)
-        s.send_message(msg)
+def send_email(api_key: str, to_addr: str, from_addr: str, subject: str, body: str) -> None:
+    """One POST to the Resend API. Raises on failure, mirroring report.py's
+    post_slack() shape."""
+    resp = httpx.post(
+        RESEND_API,
+        headers={"Authorization": f"Bearer {api_key}"},
+        json={"from": from_addr, "to": [to_addr], "subject": subject, "text": body},
+        timeout=15.0,
+    )
+    if resp.status_code >= 300:
+        raise RuntimeError(f"resend post rejected: HTTP {resp.status_code} {resp.text}")
 
 
 def _need(name: str) -> str:
@@ -212,12 +216,9 @@ def main():
         return
 
     send_email(
-        os.environ.get("SMTP_HOST", "smtp.gmail.com"),
-        int(os.environ.get("SMTP_PORT", "465")),
-        _need("SMTP_USER"),
-        _need("SMTP_APP_PASSWORD"),
+        _need("RESEND_API_KEY"),
         _need("DIGEST_EMAIL_TO"),
-        os.environ.get("DIGEST_EMAIL_FROM") or os.environ.get("SMTP_USER", ""),
+        os.environ.get("DIGEST_EMAIL_FROM", "onboarding@resend.dev"),
         subject, body,
     )
     print("[sent]")

@@ -262,10 +262,12 @@ gateway only logs `stats` when one of those counts actually moves, so its mere
 presence in the window already means "something changed"), a login completed
 (`token-issued`), an anomaly occurred (same 5xx/error/critical counting as the hourly
 digest), or the liveness probe failed. Silent otherwise — no daily "all clear" email.
-Sends via SMTP (`smtplib`, e.g. a Gmail App Password — not the account password).
-Requires repo secrets `RAILWAY_API_TOKEN` (shared with the hourly digest),
-`SMTP_USER`, `SMTP_APP_PASSWORD`, `DIGEST_EMAIL_TO` (service/environment ids and
-`GATEWAY_URL` are set as workflow env). Run it by hand with
+Sends via the [Resend](https://resend.com) HTTP API (one POST, no mail-account
+credential). Requires repo secrets `RAILWAY_API_TOKEN` (shared with the hourly
+digest), `RESEND_API_KEY`, `DIGEST_EMAIL_TO` (service/environment ids and
+`GATEWAY_URL` are set as workflow env; `DIGEST_EMAIL_FROM` defaults to Resend's
+shared `onboarding@resend.dev` sender — point it at a domain you've verified
+with Resend for a branded From: address). Run it by hand with
 `python scripts/daily_security_digest.py --dry-run` (needs `RAILWAY_API_TOKEN`,
 `RAILWAY_SERVICE_ID`, `RAILWAY_ENVIRONMENT_ID`, `GATEWAY_URL` in the environment).
 
