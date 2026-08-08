@@ -1,11 +1,11 @@
 name: Hourly health digest
 
+# Disabled: no schedule trigger. This workflow posts to Slack, and this
+# deployment doesn't use Slack (SLACK_WEBHOOK_URL is intentionally unset) --
+# scheduling it would just fail hourly on the missing secret. Left runnable
+# via workflow_dispatch in case Slack alerting is wanted again later; the
+# daily security digest (email, changes-only) covers this deployment instead.
 on:
-  schedule:
-    # Minute 0 is GitHub's most congested cron slot — on 2026-07-19 it skipped
-    # 5 of 12 hours outright and delayed the rest 6–52 min. An off-peak minute
-    # fires far more reliably (GitHub cron is still best-effort).
-    - cron: "17 * * * *"
   workflow_dispatch:
     inputs:
       dry_run:
