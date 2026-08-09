@@ -212,8 +212,12 @@ def main():
     start_iso = (now - timedelta(hours=args.window_hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
     end_iso = now.strftime("%Y-%m-%dT%H:%M:%SZ")
 
+    # Railway's deploymentLogs rejects limit=10000 outright ("Error in limit -
+    # Invalid input" -- an undocumented server-side cap). hourly_digest.py's
+    # default of 5000 is known-good in production; reuse it rather than guess
+    # at the real ceiling.
     deployment_id = hd.resolve_deployment_id(token, service_id, environment_id)
-    rows = hd.fetch_logs(token, deployment_id, start_iso, end_iso, limit=10000)
+    rows = hd.fetch_logs(token, deployment_id, start_iso, end_iso, limit=5000)
     summary = hd.summarize(rows)
     stats = stats_snapshots(rows)
     logins = token_issuances(rows)
