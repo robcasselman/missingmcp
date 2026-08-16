@@ -60,7 +60,14 @@ jobs:
           ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && '--dry-run' || '' }}
           ${{ (github.event_name == 'workflow_dispatch' && inputs.test_email) && '--test-email' || '' }}
       - name: Save digest state
-        if: always() && !(github.event_name == 'workflow_dispatch' && inputs.test_email)
+        # digest-state.json only exists when a `stats` event actually fired
+        # this window (see save_state() in the script) -- a totally quiet
+        # window (no stats, no restart) leaves nothing to cache. Guard on the
+        # file's existence so that's a skipped step, not a yellow "cache save
+        # failed" warning on an otherwise clean run.
+        if: >
+          always() && !(github.event_name == 'workflow_dispatch' && inputs.test_email)
+          && hashFiles('digest-state.json') != ''
         uses: actions/cache/save@v4
         with:
           path: digest-state.json
