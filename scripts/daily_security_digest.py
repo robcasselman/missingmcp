@@ -4,13 +4,24 @@
 Reads the gateway's last ~24h of Railway logs (same GraphQL API and log-parsing
 machinery as hourly_digest.py, imported from it directly to avoid duplicating
 that logic) and looks for the signals that matter for a single-operator
-deployment: account/token/client count changes (the gateway only ever emits a
-`stats` event when one of those counts actually changes, so its mere presence
-in the window IS the "something changed" signal), completed logins
+deployment: account/token/client count changes, completed logins
 (`token-issued`, which carries the account_key), and the same anomaly counting
 hourly_digest.py already does (5xx / error / critical rows, re-auth self-heals
-excluded). If none of that fired in the window, the script prints why and exits
-without sending anything -- no daily "all clear" noise.
+excluded). If none of that happened in the window, the script prints why and
+exits without sending anything -- no daily "all clear" noise.
+
+Account/token counts are compared against a baseline persisted ACROSS RUNS
+(read/written via --state-file, meant to be restored/saved by a GitHub Actions
+cache step) rather than treated as "changed" whenever a `stats` log line
+merely exists in the window. That distinction matters: the gateway logs
+`stats` whenever its in-memory last-known values differ from the new ones
+(store.py / app.py), but that comparison baseline is process-local and resets
+to nothing on every restart -- so the first tick after ANY restart (a
+redeploy, a crash, anything) logs a `stats` line unconditionally, even when
+the actual numbers are identical to before the restart. Treating that
+log line's mere presence as "something changed" (the first version of this
+script did) produces a false alert on every restart day. Comparing the
+window's latest snapshot against a real persisted baseline avoids that.
 
 Standalone (httpx + stdlib only, does not import the missingmcp package), so it
 runs in GitHub Actions without installing the gateway's dependencies.
@@ -34,6 +45,7 @@ Env:
                           "anomaly" instead of "activity" (default 3)
 
 Usage: python scripts/daily_security_digest.py [--dry-run] [--window-hours 24]
+                                               [--state-file digest-state.json]
 On Railway/GitHub Actions this needs no gateway access -- it only reads Railway
 logs and sends mail.
 """
@@ -72,12 +84,14 @@ _STATS_FIELDS = [
 
 def stats_snapshots(rows: list[dict]) -> list[dict]:
     """Every `stats` event in the window, in the order Railway returned them,
-    as {field: value} dicts (missing fields omitted). The gateway only emits
-    `stats` on startup and whenever one of its counts changes (see store.py /
-    app.py), so each entry here already represents a real change -- there is
-    no need to diff against a prior run's state. parse_row() collapses
-    attributes down to a fixed shape that drops the stats-specific fields, so
-    this decodes each row's attributes directly instead."""
+    as {field: value} dicts (missing fields omitted). NOTE: a `stats` line
+    existing here does NOT by itself mean a count actually changed -- the
+    gateway also logs one unconditionally on the first tick after any process
+    restart (its dedup baseline is process-local and resets to nothing on
+    restart). Callers must diff the latest entry against a real cross-run
+    baseline (see diff_stats) rather than treat presence as signal.
+    parse_row() collapses attributes down to a fixed shape that drops the
+    stats-specific fields, so this decodes each row's attributes directly."""
     out = []
     for row in rows:
         raw = {a["key"]: _decode(a["value"]) for a in (row.get("attributes") or [])}
@@ -88,6 +102,42 @@ def stats_snapshots(rows: list[dict]) -> list[dict]:
             snap["_timestamp"] = row.get("timestamp")
             out.append(snap)
     return out
+
+
+def diff_stats(latest: "dict | None", baseline: dict) -> dict:
+    """Fields where `latest` (the window's newest `stats` snapshot, or None if
+    no `stats` event fired at all) differs from `baseline` (the persisted
+    cross-run state). Returns {field: (old, new)} for only the differing
+    fields. An empty baseline (first run ever -- no prior state to compare
+    against) never produces a diff, mirroring the "fresh process trusts
+    nothing" rule workers.py already follows for its own baseline."""
+    if latest is None or not baseline:
+        return {}
+    out = {}
+    for key, _label in _STATS_FIELDS:
+        if key not in latest:
+            continue
+        old = baseline.get(key)
+        if old is not None and old != latest[key]:
+            out[key] = (old, latest[key])
+    return out
+
+
+def load_state(path: str) -> dict:
+    """Best-effort read of the persisted baseline. Missing or unparseable ->
+    empty dict (first-run / corrupt-cache both degrade to "no prior baseline",
+    never a crash)."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_state(path: str, state: dict) -> None:
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(state, f)
 
 
 def token_issuances(rows: list[dict]) -> list[dict]:
@@ -101,17 +151,18 @@ def token_issuances(rows: list[dict]) -> list[dict]:
     return out
 
 
-def should_alert(summary: dict, n_stats: int, n_logins: int, probe_ok: bool) -> bool:
+def should_alert(summary: dict, n_diffs: int, n_logins: int, probe_ok: bool) -> bool:
     """True when the digest is worth sending at all -- an account/token/client
-    count changed, a login completed, an anomaly occurred, or the liveness
-    probe failed. False (silent) on a quiet day."""
-    return bool(n_stats or n_logins or summary["problems"] or summary["critical"]
+    count genuinely changed vs. the persisted baseline, a login completed, an
+    anomaly occurred, or the liveness probe failed. False (silent) on a quiet
+    day -- including a day that merely restarted with no real change."""
+    return bool(n_diffs or n_logins or summary["problems"] or summary["critical"]
                 or not probe_ok)
 
 
-def render_email(summary: dict, stats: list[dict], logins: list[dict],
-                 probe_ok: bool, window_hours: int, gateway_url: str,
-                 anomaly_min: int) -> tuple[str, str]:
+def render_email(summary: dict, latest_stats: "dict | None", diffs: dict,
+                 logins: list[dict], probe_ok: bool, window_hours: int,
+                 gateway_url: str, anomaly_min: int) -> tuple[str, str]:
     """Returns (subject, plain-text body)."""
     loud = summary["problems"] >= anomaly_min or summary["critical"] > 0 or not probe_ok
     if not probe_ok:
@@ -127,13 +178,14 @@ def render_email(summary: dict, stats: list[dict], logins: list[dict],
         "",
     ]
 
-    if stats:
-        latest = stats[-1]
-        lines.append(f"Account/token counts changed {len(stats)} time(s) in this window.")
-        lines.append("Latest counts:")
-        for key, label in _STATS_FIELDS:
-            if key in latest:
-                lines.append(f"  - {label}: {latest[key]}")
+    if diffs:
+        lines.append("Account/token counts changed:")
+        labels = dict(_STATS_FIELDS)
+        for key, (old, new) in diffs.items():
+            lines.append(f"  - {labels.get(key, key)}: {old} -> {new}")
+    elif latest_stats:
+        lines.append("Account/token counts: no change since last known state "
+                      "(a restart logged a stats line, but the numbers match).")
     else:
         lines.append("Account/token counts: no change.")
     lines.append("")
@@ -183,6 +235,10 @@ def main():
     p = argparse.ArgumentParser(description="Daily gateway security digest -> email.")
     p.add_argument("--dry-run", action="store_true", help="print, don't send")
     p.add_argument("--window-hours", type=int, default=24, help="log window in hours")
+    p.add_argument("--state-file", default="digest-state.json",
+                   help="cross-run baseline for account/token/client counts "
+                        "(read at start, written at end -- a CI step is expected "
+                        "to restore/save this path across runs, e.g. actions/cache)")
     p.add_argument("--test-email", action="store_true",
                    help="send one canned test message via Resend and exit, skipping "
                         "Railway/change-detection entirely -- verifies RESEND_API_KEY "
@@ -220,14 +276,25 @@ def main():
     rows = hd.fetch_logs(token, deployment_id, start_iso, end_iso, limit=5000)
     summary = hd.summarize(rows)
     stats = stats_snapshots(rows)
+    latest_stats = stats[-1] if stats else None
     logins = token_issuances(rows)
     probe_ok = hd.probe(gateway_url)
 
-    alert = should_alert(summary, len(stats), len(logins), probe_ok)
-    subject, body = render_email(summary, stats, logins, probe_ok,
+    baseline = load_state(args.state_file)
+    diffs = diff_stats(latest_stats, baseline)
+
+    alert = should_alert(summary, len(diffs), len(logins), probe_ok)
+    subject, body = render_email(summary, latest_stats, diffs, logins, probe_ok,
                                  args.window_hours, gateway_url, anomaly_min)
     print(f"[alert={alert}] {subject}")
     print(body)
+
+    # Always advance the baseline to the latest known values, alert or not --
+    # a quiet day's numbers are still the truth the NEXT run should compare
+    # against. A window with no `stats` event at all leaves the file as-is.
+    if latest_stats is not None:
+        save_state(args.state_file, {k: v for k, v in latest_stats.items()
+                                     if k != "_timestamp"})
 
     if not alert:
         print("[silent] nothing changed in the window -- no email sent.")

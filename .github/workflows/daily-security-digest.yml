@@ -41,8 +41,27 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install "httpx>=0.27"
+      # Cross-run baseline for account/token/client counts. The gateway's own
+      # dedup for the `stats` log line is process-local and resets on every
+      # restart (redeploy, crash, anything) -- without a REAL baseline here,
+      # any restart looks like a change. "Mutable cache" idiom: save under a
+      # run-unique key, restore via the shared prefix to always get the latest.
+      - name: Restore digest state
+        if: "!(github.event_name == 'workflow_dispatch' && inputs.test_email)"
+        uses: actions/cache/restore@v4
+        with:
+          path: digest-state.json
+          key: daily-digest-state-${{ github.run_id }}
+          restore-keys: |
+            daily-digest-state-
       - name: Run digest
         run: >
           python scripts/daily_security_digest.py
           ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && '--dry-run' || '' }}
           ${{ (github.event_name == 'workflow_dispatch' && inputs.test_email) && '--test-email' || '' }}
+      - name: Save digest state
+        if: always() && !(github.event_name == 'workflow_dispatch' && inputs.test_email)
+        uses: actions/cache/save@v4
+        with:
+          path: digest-state.json
+          key: daily-digest-state-${{ github.run_id }}
