@@ -22,7 +22,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 TEMPLATE = ROOT / "src" / "missingmcp" / "templates" / "garmin.html"
-REPO_URL = "https://github.com/Taxuspt/garmin_mcp"
+REPO_URL = "https://github.com/Taxuspt/garmin_mcp"  # fallback when the Dockerfile names no repo
 BEGIN = "<!-- GENERATED:TOOLS:BEGIN"
 END = "<!-- GENERATED:TOOLS:END -->"
 
@@ -54,8 +54,13 @@ def pinned_ref() -> str:
     return m.group(1)
 
 
+def pinned_repo() -> str:
+    m = re.search(r"^ARG GARMIN_MCP_REPO=(\S+)", (ROOT / "Dockerfile").read_text(), re.M)
+    return m.group(1) if m else REPO_URL
+
+
 def clone_at(ref: str, dest: str) -> Path:
-    subprocess.run(["git", "clone", "--quiet", REPO_URL, dest], check=True)
+    subprocess.run(["git", "clone", "--quiet", pinned_repo(), dest], check=True)
     subprocess.run(["git", "-C", dest, "checkout", "--quiet", ref], check=True)
     return Path(dest)
 
@@ -102,8 +107,8 @@ def render(groups: list[tuple[str, list[tuple[str, str]]]], ref: str) -> str:
     total = sum(len(tools) for _, tools in groups)
     out = [
         f'      <p class="lede">All <strong>{total} tools</strong> this connector currently exposes, '
-        f'grouped by area &mdash; straight from the <a href="{REPO_URL}">garmin_mcp</a> source '
-        f'(<a href="{REPO_URL}/tree/{ref}"><code>{ref[:7]}</code></a>). Click a group to expand.</p>',
+        f'grouped by area &mdash; straight from the <a href="{pinned_repo()}">garmin_mcp</a> source '
+        f'(<a href="{pinned_repo()}/tree/{ref}"><code>{ref[:7]}</code></a>). Click a group to expand.</p>',
         '      <div class="tools">',
     ]
     for module, tools in groups:

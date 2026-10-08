@@ -2,10 +2,16 @@ FROM python:3.12-slim
 RUN pip install --no-cache-dir uv
 WORKDIR /app
 
-# Pin the unmodified garmin_mcp worker to a reviewed commit (override at build
-# time). Bumping this is a deliberate, reviewed action: the worker runs with each
+# Pin the garmin_mcp worker to a reviewed commit (override at build time).
+# Bumping this is a deliberate, reviewed action: the worker runs with each
 # user's decrypted Garmin tokens, so a floating ref would run unreviewed code.
-ARG GARMIN_MCP_REF=2974244bfda1595b00836b3f942f579ec2d6f7d6
+#
+# Source: robcasselman/garmin_mcp, which is Taxuspt/garmin_mcp at 2974244 plus
+# one fix (FIT records carry altitude, speed and distance from the enhanced_*
+# fields modern devices write; upstream dropped them). Upstream PR: https://github.com/Taxuspt/garmin_mcp/pull/383
+# Point GARMIN_MCP_REPO back at Taxuspt once that fix is in an upstream commit.
+ARG GARMIN_MCP_REPO=https://github.com/robcasselman/garmin_mcp
+ARG GARMIN_MCP_REF=01b248a96af85f004d61eda78f52a8a6357a986b
 ENV GARMIN_MCP_REF=${GARMIN_MCP_REF}
 
 # git: uv installs the pinned garmin_mcp worker from a git ref.
@@ -21,7 +27,7 @@ COPY scripts ./scripts
 # ModuleNotFoundError (2026-07-31 incident). The worker's other deps float too;
 # pin here, in the same resolve, whenever one of them breaks the same way.
 RUN uv pip install --system . && \
-    uv pip install --system "garmin-mcp @ git+https://github.com/Taxuspt/garmin_mcp@${GARMIN_MCP_REF}" "mcp<2"
+    uv pip install --system "garmin-mcp @ git+${GARMIN_MCP_REPO}@${GARMIN_MCP_REF}" "mcp<2"
 ENTRYPOINT ["tini", "--"]
 CMD ["missingmcp"]
 EXPOSE 8080
