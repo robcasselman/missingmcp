@@ -33,6 +33,10 @@ def test_unauthorized_without_bearer(tmp_path, fake_worker):
     c = _app(conn, mgr, cfg)
     r = c.post("/mcp", json={"jsonrpc": "2.0"})
     assert r.status_code == 401
+    # RFC 9728 §5.1: the first 401 must point the client at the resource metadata,
+    # or header-only discoverers (Cloudflare MCP portals) can't start OAuth.
+    assert r.headers["www-authenticate"] == (
+        'Bearer resource_metadata="https://x/.well-known/oauth-protected-resource/garmin/mcp"')
 
 
 def test_authorized_forwards_to_worker(tmp_path, fake_worker):
@@ -63,6 +67,9 @@ def test_bearer_for_other_adapter_is_rejected(tmp_path, fake_worker):
                headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 401                  # garmin path must not accept a foreign token
     assert r.json() == {"error": "invalid_token"}   # authenticate() rejected it, not the unknown_account path
+    assert r.headers["www-authenticate"] == (
+        'Bearer error="invalid_token", '
+        'resource_metadata="https://x/.well-known/oauth-protected-resource/garmin/mcp"')
 
 
 def test_worker_start_failure_maps_to_reauth_401(tmp_path, fake_worker):

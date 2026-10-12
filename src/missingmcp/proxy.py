@@ -77,8 +77,28 @@ def _capture_mcp(event, key: str, status: int, ttfb_ms: int, total_ms: int,
     telemetry.capture(name, distinct_id=key, properties=props)
 
 
-async def authenticate(request, adapter_name, conn, rate) -> "str | Response":
+def resource_metadata_url(config, adapter_name) -> str:
+    """RFC 9728 protected-resource metadata URL for an adapter's /mcp endpoint."""
+    return f"{config.public_url}/.well-known/oauth-protected-resource/{adapter_name}/mcp"
+
+
+async def authenticate(request, adapter_name, conn, rate,
+                       resource_meta: "str | None" = None) -> "str | Response":
+    """Resolve the Bearer token to an account key, or return the error Response.
+
+    Every 401 carries the RFC 9728 challenge (`WWW-Authenticate: Bearer
+    resource_metadata=...`) when `resource_meta` is given. MCP clients that
+    discover OAuth only from that header (Cloudflare MCP server portals, for one)
+    can't register without it; clients that also probe the well-known path work
+    either way."""
     ip = request.client.host if request.client else "unknown"
+
+    def unauthorized(error: str) -> JSONResponse:
+        headers = {}
+        if resource_meta:
+            headers["WWW-Authenticate"] = f'Bearer error="{error}", resource_metadata="{resource_meta}"' \
+                if error == "invalid_token" else f'Bearer resource_metadata="{resource_meta}"'
+        return JSONResponse({"error": error}, status_code=401, headers=headers)
 
     def unauth_limited() -> bool:
         # Per-IP budget for traffic WITHOUT a valid Bearer token. Kept off the
@@ -91,7 +111,7 @@ async def authenticate(request, adapter_name, conn, rate) -> "str | Response":
     if not header.startswith("Bearer "):
         if unauth_limited():
             return JSONResponse({"error": "rate_limited"}, status_code=429)
-        return JSONResponse({"error": "unauthorized"}, status_code=401)
+        return unauthorized("unauthorized")
     token_hash = store.hash_token(header[7:])
     if not rate.check(f"tok:{token_hash}", limit=60, window=60):
         return JSONResponse({"error": "rate_limited"}, status_code=429)
@@ -99,7 +119,7 @@ async def authenticate(request, adapter_name, conn, rate) -> "str | Response":
     if found is None or found[0] != adapter_name:   # unknown, or belongs to another connector
         if unauth_limited():
             return JSONResponse({"error": "rate_limited"}, status_code=429)
-        return JSONResponse({"error": "invalid_token"}, status_code=401)
+        return unauthorized("invalid_token")
     return found[1]
 
 
@@ -110,8 +130,7 @@ def _reauth_required(config, adapter) -> JSONResponse:
     RFC 9728 resource-metadata challenge so the MCP client re-runs authorization and
     the user self-heals with a fresh sign-in. A 502 here is a dead end: MCP clients
     don't recover from it and retry forever (oauth-client-lifecycle follow-up #2)."""
-    resource_meta = (f"{config.public_url}/.well-known/"
-                     f"oauth-protected-resource/{adapter.name}/mcp")
+    resource_meta = resource_metadata_url(config, adapter.name)
     challenge = (f'Bearer error="invalid_token", '
                  f'error_description="stored {adapter.display_name} session expired", '
                  f'resource_metadata="{resource_meta}"')
@@ -136,7 +155,8 @@ async def handle_mcp(request, method, adapter, conn, manager, config, secret, ra
     t0 = time.monotonic()
     log("mcp-request", adapter=adapter.name, method=method,
         has_session=bool(request.headers.get("mcp-session-id")))
-    auth = await authenticate(request, adapter.name, conn, rate)
+    auth = await authenticate(request, adapter.name, conn, rate,
+                              resource_metadata_url(config, adapter.name))
     if isinstance(auth, Response):
         log("mcp-auth-rejected", method=method, status=auth.status_code)
         return auth
