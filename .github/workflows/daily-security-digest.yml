@@ -1,11 +1,9 @@
 name: Daily security digest
 
+# Disabled (2026-10-16): no schedule trigger -- the daily email is no longer
+# wanted. Left runnable via workflow_dispatch in case it's wanted again; to
+# re-enable, restore a `schedule:` trigger (off-peak minute, e.g. "23 7 * * *").
 on:
-  schedule:
-    # Off-peak minute (see hourly-digest.yml's note on cron minute 0 being
-    # GitHub's most congested slot). The script computes its own 24h window,
-    # so the exact fire time only matters for reliability, not correctness.
-    - cron: "23 7 * * *"
   workflow_dispatch:
     inputs:
       dry_run:

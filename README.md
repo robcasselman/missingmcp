@@ -256,8 +256,9 @@ the `Project-Access-Token` header) or an account/workspace token (sent as
 `RAILWAY_SERVICE_ID`, `RAILWAY_ENVIRONMENT_ID` in the environment).
 
 **Daily security digest (email)** — a GitHub Actions workflow
-(`.github/workflows/daily-security-digest.yml`) runs `scripts/daily_security_digest.py`
-once a day: it reads the last 24h of the gateway's Railway logs and emails a summary
+(`.github/workflows/daily-security-digest.yml`) runs `scripts/daily_security_digest.py`.
+**Currently disabled** — the workflow has no schedule and runs only via manual
+dispatch; restore its `schedule:` trigger to resume daily emails. When run, it reads the last 24h of the gateway's Railway logs and emails a summary
 **only when something changed** — an account/token/OAuth-client count changed (the
 gateway only logs `stats` when one of those counts actually moves, so its mere
 presence in the window already means "something changed"), a login completed

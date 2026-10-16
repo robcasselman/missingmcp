@@ -3,8 +3,8 @@ name: Hourly health digest
 # Disabled: no schedule trigger. This workflow posts to Slack, and this
 # deployment doesn't use Slack (SLACK_WEBHOOK_URL is intentionally unset) --
 # scheduling it would just fail hourly on the missing secret. Left runnable
-# via workflow_dispatch in case Slack alerting is wanted again later; the
-# daily security digest (email, changes-only) covers this deployment instead.
+# via workflow_dispatch in case Slack alerting is wanted again later. (The
+# daily security digest email is likewise disabled -- dispatch-only.)
 on:
   workflow_dispatch:
     inputs:
